@@ -236,7 +236,7 @@ class COMA(object):
 def game(mode):
     torch.set_num_threads(1)
     env = EnvFindGoals()
-    max_epi_iter = 1000
+    max_epi_iter = 10
     max_MC_iter = 200
     agent = COMA(N_action=5)
     train_curve = []
@@ -371,4 +371,6 @@ if __name__ == '__main__':
     for i in range(loop):
         for mode in modes:
             plot[str(i)+"_"+str(mode)] = game(mode=mode)
+            plot[str(i)+"_"+str(mode)].title(str(i)+"_"+str(mode))
             plot[str(i)+"_"+str(mode)].show()
+            

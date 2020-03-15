@@ -6,10 +6,11 @@ import torch.nn as nn
 import torch
 from torch.autograd import Variable
 from scipy import stats
-import seaborn as sns
+#import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score,confusion_matrix
 from sklearn.preprocessing import OneHotEncoder
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 INPUT_SIZE = 1#3
 SEQ_SIZE = 30
@@ -17,7 +18,7 @@ HIDDEN_SIZE = 64
 NUM_LAYERS = 2
 OUTPUT_SIZE = 3
 learning_rate = 0.001
-num_epochs = 50
+num_epochs = 100
 Data_type = 'Daily' ##'Daily','Monthly', 'Quarterly'
 
 ################# Data Preparation ###########################
@@ -113,10 +114,10 @@ class RNN(nn.Module):
             input_size=i_size,
             hidden_size=h_size,
             num_layers=n_layers
-        )
-        self.out = nn.Linear(h_size, o_size)
+        ).to(device)
+        self.out = nn.Linear(h_size, o_size).to(device)
         self.softmax = nn.Softmax(dim=1)
-        self.regression = nn.Linear(h_size, 1)
+        self.regression = nn.Linear(h_size, 1).to(device)
 
     def forward(self, x, h_state):
         r_out, hidden_state = self.rnn(x, h_state)
@@ -138,7 +139,7 @@ rnn = RNN(INPUT_SIZE, HIDDEN_SIZE, NUM_LAYERS, OUTPUT_SIZE)
 optimiser = torch.optim.Adam(rnn.parameters(), lr=learning_rate)
 criterion = nn.BCELoss()#nn.MSELoss()
 criterion2 = nn.MSELoss()
-hidden_state = None
+hidden_state = torch.zeros(NUM_LAYERS,SEQ_SIZE,HIDDEN_SIZE, requires_grad = False).to(device)
 
 #################################################################################################
 
@@ -152,29 +153,30 @@ for epoch in range(num_epochs):
         train_X_all = np.array_split(train_X,number_of_batch)
         train_y_all = np.array_split(train_y,number_of_batch)
         
-        inputs = Variable(torch.from_numpy(train_X_all[j]).float().view(-1,SEQ_SIZE,INPUT_SIZE))
+        inputs = Variable(torch.from_numpy(train_X_all[j]).to(device).float().view(-1,SEQ_SIZE,INPUT_SIZE))
         inputs.shape
         #print("X_train shape =",torch.from_numpy(X_train).float().view(-1,SEQ_SIZE,INPUT_SIZE))
-        labels = Variable(torch.from_numpy(train_y_all[j][:,1:4]).float())
+        labels = Variable(torch.from_numpy(train_y_all[j][:,1:4]).to(device).float())
         labels.shape
         #labels = labels[30:]
         train_y_magnitude = Variable(torch.from_numpy(train_y_all[j][:,0]).float()).view(-1,1)
         #print("shape =",inputs.shape)
-        output, output2, hidden_state = rnn(inputs, hidden_state)
+        #hidden_state.detach()
+        output, output2, hidden_state = rnn(inputs, hidden_state.detach())
         output.shape
         output = output.view(-1,SEQ_SIZE,OUTPUT_SIZE)
         output = output[:,SEQ_SIZE-1]
         output2 = output2.view(-1,SEQ_SIZE,1)
         output2 = output2[:,SEQ_SIZE-1]
-        hidden_state[0].detach
-        hidden_state[1].detach
+        #hidden_state[0].detach()
+        #hidden_state.detach()
         #output.view(-1).shape
         labels.shape
         output.shape
         output2.shape
-        loss = criterion(output, labels.detach()) + criterion2(output2, train_y_magnitude.detach())
+        loss = criterion(output.to(device), labels.to(device).detach()) + criterion2(output2.to(device), train_y_magnitude.to(device).detach())
         optimiser.zero_grad()
-        loss.backward(retain_graph=True)                     # back propagation
+        loss.backward()                     # back propagation
         optimiser.step()                                     # update the parameters
     
     print('epoch {}, loss {}'.format(epoch,loss.item()))
@@ -182,7 +184,7 @@ for epoch in range(num_epochs):
 ######################################################
 ##################################################################
 
-inputs = Variable(torch.from_numpy(test_X).float().view(-1,SEQ_SIZE,INPUT_SIZE))
+inputs = Variable(torch.from_numpy(test_X).to(device).float().view(-1,SEQ_SIZE,INPUT_SIZE))
 
 outs, outs2, b = rnn(inputs, hidden_state)
 outs = outs[:,SEQ_SIZE-1]
@@ -195,17 +197,18 @@ _, predict_y = torch.max(outs, 1)
 test_y = enc.inverse_transform(test_y[:,1:4])
 test_y = test_y.reshape(-1).astype(int)
 
-print ('prediction accuracy', accuracy_score(test_y, predict_y.data.numpy()))
-print ('macro precision', precision_score(test_y.data, predict_y.data, average='macro'))
-print ('micro precision', precision_score(test_y.data, predict_y.data, average='micro'))
-print ('macro recall', recall_score(test_y.data, predict_y.data, average='macro'))
-print ('micro recall', recall_score(test_y.data, predict_y.data, average='micro'))
+print ('prediction accuracy', accuracy_score(test_y, predict_y.cpu().data.numpy()))
+conf_matrix = confusion_matrix(test_y, predict_y.cpu().data.numpy())
+#print ('macro precision', precision_score(test_y.data, predict_y.data, average='macro'))
+#print ('micro precision', precision_score(test_y.data, predict_y.data, average='micro'))
+#print ('macro recall', recall_score(test_y.data, predict_y.data, average='macro'))
+#print ('micro recall', recall_score(test_y.data, predict_y.data, average='micro'))
 
-outs2 = outs2.data.numpy()
+outs2 = outs2.cpu().data.numpy()
 outs2 = outs2.reshape(-1)
 #outall = np.concatenate([train_y[:,0],outs2],0)
 plt.figure(1, figsize=(12, 5))
-plt.plot(time[:-2*SEQ_SIZE-1][-len(test_y):],outs2, color = 'red', label = 'Pred')
+plt.plot(time[:-2*SEQ_SIZE][-len(test_y):],outs2, color = 'red', label = 'Pred')
 plt.plot(time[:len(train_y)],train_y[:,0], color = 'blue', label = 'Real')
 #plt.plot(outall, color = 'green', label = 'Real')
 

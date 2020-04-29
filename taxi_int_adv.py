@@ -301,7 +301,7 @@ class ActorCritic(nn.Module):
         state_value = self.value_layer(state)
         state_value2 = self.value_layer2(state)
         
-        return action_logprobs, torch.squeeze(state_value), dist_entropy, state_value2
+        return action_logprobs, torch.squeeze(state_value), dist_entropy, torch.squeeze(state_value2)
         
 class PPO:
     def __init__(self, state_dim, action_dim, n_latent_var, lr, betas, gamma, K_epochs, eps_clip):
@@ -365,15 +365,14 @@ class PPO:
         for _ in range(self.K_epochs):
             # Evaluating old actions and values :
             logprobs, state_values, dist_entropy,state_values2 = self.policy.evaluate(old_states, old_actions)
-            
+
             # Finding the ratio (pi_theta / pi_theta__old):
             ratios = torch.exp(logprobs - old_logprobs.detach())
             adv_int_ = torch.tensor(np.array(adv_int_)).detach()
             # Finding Surrogate Loss:
             advantages = rewards - state_values.detach()
             
-            
-            adv_int_ = (adv_int_-adv_int_.mean())/adv_int_.std()
+            #adv_int_ = (adv_int_-adv_int_.mean())/adv_int_.std()
             adv_int = adv_int_ - state_values2
             adv_int = adv_int.view(-1)
             #print("adv_int",adv_int)
@@ -381,25 +380,24 @@ class PPO:
             surr2 = 0
             for i in range (len(advantages)):
                 adv_int_temp = torch.clamp(adv_int[i],min = clip_ratio*-advantages[i], max = clip_ratio*advantages[i])
-                surr1 += ratios[i]*(advantages[i] + adv_int_temp)
-                surr2 += torch.clamp(ratios[i], 1-self.eps_clip, 1+self.eps_clip) *(advantages[i] + adv_int_temp)
+                surr1 += ratios[i]*(advantages[i] +adv_int_temp)
+                surr2 += torch.clamp(ratios[i], 1-self.eps_clip, 1+self.eps_clip) *(advantages[i]+adv_int_temp)
 
              
             
             #surr1 = ratios * (advantages + torch.tensor(adv_int).float())
-            #surr2 = torch.clamp(ratios, 1-self.eps_clip, 1+self.e=s_clip) * (advantages + torch.tensor(adv_int).float())
+            #surr2 = torch.clamp(ratios, 1-self.eps_clip, 1+self.eps_clip) * (advantages + torch.tensor(adv_int).float())
             
             
-            #print(state_values2.shape)
-            #print(adv_int_.shape)
-            loss = -torch.min(surr1, surr2) + 0.5*self.MseLoss(state_values, rewards) - 0.01*dist_entropy + 0.5*self.MseLoss(state_values2.view(-1), adv_int_.detach())
-            #print("loss = ", loss)
+            
+            loss = -torch.min(surr1, surr2) + 0.5*self.MseLoss(state_values, rewards) - 0.01*dist_entropy +0.5*self.MseLoss(state_values2.view(-1), adv_int_)
+
             loss3 = self.MseLoss3(RND_Net_values.detach(), RND_predictor_values)
             loss4 = self.MseLoss3(RND_Net_values2.detach().cpu(), RND_predictor_values2.cpu())
             loss5 = self.MseLoss5(rwd_predictor_value.float(),torch.tensor(memory.rewards).float().detach())
             # take gradient step
             self.optimizer.zero_grad()
-            loss.sum().backward()
+            loss.mean().backward()
             self.optimizer.step()
             
             self.RND_net_optimizer.zero_grad()
@@ -504,7 +502,7 @@ def game(N_episodes, AI_type,Intrinsic_type,clip_ratio):
 
             #========================================================
             if ((AI_type == "PPO"or AI_type == "A2C") and Intrinsic_type == "1"):
-                intrinsic_rewards = get_intrinsic_rewards(AI_type,state,ppo,n_agents,1)
+                intrinsic_rewards = get_intrinsic_rewards(AI_type,state,ppo,n_agents,10)
                 intrinsic_rewards = intrinsic_rewards.data.numpy()
                 #print("intrinsic_rewards1",intrinsic_rewards)
             elif ((AI_type == "PPO"or AI_type == "A2C") and Intrinsic_type == "2"):
@@ -546,7 +544,7 @@ def game(N_episodes, AI_type,Intrinsic_type,clip_ratio):
                 temp_int = memory.intrinsic_rewards
                 mean1, std1, count1 = np.mean(temp_int), np.std(temp_int), len(temp_int)
                 reward_rms.update_from_moments(mean1, std1 ** 2, count1)
-                adv_int = temp_int#(temp_int)/np.sqrt(reward_rms.var)
+                adv_int = (temp_int)/np.sqrt(reward_rms.var)
                 ppo.update(memory,adv_int, clip_ratio)
                 memory.clear_memory()
                 timestep = 0
@@ -595,26 +593,22 @@ def game(N_episodes, AI_type,Intrinsic_type,clip_ratio):
 
 def main():
     AI1 = ["PPO"]#,"REINFORCE","A2C","PPO","COMA","COMA2"
-    N_episodes = 1500
+    N_episodes = 2500
     for AI in AI1:
         
-        #avg_reward, best_avg_reward,samp_rewards,stats = game(N_episodes, AI,"1",0) 
-        #plot("Taxi",avg_reward, best_avg_reward,samp_rewards, AI,'b')
-        
+        avg_reward, best_avg_reward,samp_rewards,stats = game(N_episodes, AI,"1",0) 
+        plot("Taxi",avg_reward, best_avg_reward,samp_rewards, AI,'b')
         avg_reward, best_avg_reward,samp_rewards,stats = game(N_episodes, AI, "1",0.1) 
         plot("Taxi",avg_reward, best_avg_reward,samp_rewards, AI,'g')
         avg_reward, best_avg_reward,samp_rewards,stats = game(N_episodes, AI, "1",0.2) 
         plot("Taxi",avg_reward, best_avg_reward,samp_rewards, AI,'r')
-        
         avg_reward, best_avg_reward,samp_rewards,stats = game(N_episodes, AI, "1",0.5) 
         plot("Taxi",avg_reward, best_avg_reward,samp_rewards, AI,'y')
         avg_reward, best_avg_reward,samp_rewards,stats = game(N_episodes, AI, "1",1) 
         plot("Taxi",avg_reward, best_avg_reward,samp_rewards, AI,'c')
         """
-        avg_reward, best_avg_reward,samp_rewards,stats = game(N_episodes, AI, "1",2) 
-        plot("Taxi",avg_reward, best_avg_reward,samp_rewards, AI,'m')
-        """
-        """
+        avg_reward, best_avg_reward,samp_rewards,stats = game(N_episodes, AI, "2") 
+        plot("Taxi",avg_reward, best_avg_reward,samp_rewards, AI,'r')
         avg_reward, best_avg_reward,samp_rewards,stats = game(N_episodes, AI, "3") 
         plot("Taxi",avg_reward, best_avg_reward,samp_rewards, AI,'c')
         avg_reward, best_avg_reward,samp_rewards,stats = game(N_episodes, AI, "4") 
